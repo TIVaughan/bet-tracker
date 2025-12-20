@@ -1,210 +1,136 @@
-# app.py
-import streamlit as st
-import pandas as pd
-import altair as alt
+# Add these imports at the top of the file
+from datetime import datetime
+import io
+from typing import List, Dict, Any
+import numpy as np
 
-
-# ----------------------------
-# Helper functions
-# ----------------------------
-def calculate_payout(odds: float, amount: float) -> float:
-    """Calculate total payout (stake + profit) for American odds."""
-    if odds > 0:
-        return amount + (odds / 100.0) * amount
-    else:
-        return amount + (100.0 / abs(odds)) * amount
+# Update the BetEntry type to include a date
+BetEntry = Dict[str, Any]
 
 def init_state():
     st.session_state.setdefault("total_position", 0.0)
     st.session_state.setdefault("total_returns", 0.0)
     st.session_state.setdefault("available_credit", 0.0)
     st.session_state.setdefault("history", [])
+    st.session_state.setdefault("open_bets", [])  # Track open bets separately
 
-def reset_all():
-    st.session_state.total_position = 0.0
-    st.session_state.total_returns = 0.0
-    st.session_state.available_credit = 0.0
-    st.session_state.history = []
-    st.success("All bets have been reset!")
+def process_csv_upload(uploaded_file) -> List[BetEntry]:
+    """Process uploaded CSV file and return list of bet entries."""
+    try:
+        df = pd.read_csv(uploaded_file)
+        # Ensure required columns exist
+        required_columns = ['amount', 'odds', 'result', 'date']
+        if not all(col in df.columns for col in required_columns):
+            st.error(f"CSV must contain columns: {', '.join(required_columns)}")
+            return []
+        
+        bets = []
+        for _, row in df.iterrows():
+            bet = {
+                "Amount": float(row['amount']),
+                "Odds": float(row['odds']),
+                "Result": "WIN" if str(row['result']).strip().upper() in ['WIN', 'W', '1', 'TRUE'] else "LOSS",
+                "Date": pd.to_datetime(row['date']).date(),
+                "Status": "CLOSED"
+            }
+            bets.append(bet)
+        return bets
+    except Exception as e:
+        st.error(f"Error processing CSV: {str(e)}")
+        return []
 
-def record_bet(amount: float, odds: float, result: str):
-    """Update state based on a single bet entry."""
-    st.session_state.total_position += amount
+def get_daily_metrics(bets: List[BetEntry]) -> pd.DataFrame:
+    """Calculate daily metrics from bet history."""
+    if not bets:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(bets)
+    df['Date'] = pd.to_datetime(df['Date'])
+    df['Profit'] = df.apply(
+        lambda x: (calculate_payout(x['Odds'], x['Amount']) - x['Amount']) 
+        if x['Result'] == 'WIN' else -x['Amount'], 
+        axis=1
+    )
+    
+    daily = df.groupby('Date').agg({
+        'Profit': 'sum',
+        'Amount': 'count'
+    }).reset_index()
+    
+    daily['Cumulative'] = daily['Profit'].cumsum()
+    return daily
 
-    if result == "+":
-        payout = calculate_payout(odds, amount)
-        profit = payout - amount
-        st.session_state.total_returns += profit
-        st.session_state.available_credit += payout
-        entry = {
-            "Amount": amount,
-            "Odds": odds,
-            "Result": "WIN",
-            "Payout": round(payout, 2),
-            "Profit": round(profit, 2)
-        }
-        st.success(f"Win recorded: Profit ${profit:.2f}, Payout ${payout:.2f}")
-    else:
-        st.session_state.total_returns -= amount
-        st.session_state.available_credit -= amount
-        entry = {
-            "Amount": amount,
-            "Odds": odds,
-            "Result": "LOSS",
-            "Payout": 0.0,
-            "Profit": -round(amount, 2)
-        }
-        st.warning(f"Loss recorded: Lost ${amount:.2f}")
+def plot_daily_performance(closed_bets: List[BetEntry], open_bets: List[BetEntry] = None) -> alt.Chart:
+    """Create an area chart showing daily performance."""
+    # Process closed bets
+    closed_df = get_daily_metrics(closed_bets) if closed_bets else pd.DataFrame()
+    
+    # Create base chart
+    if not closed_df.empty:
+        base = alt.Chart(closed_df).encode(
+            x=alt.X('Date:T', title='Date'),
+            y=alt.Y('Cumulative:Q', title='Cumulative Profit ($)')
+        )
+        
+        # Add closed bets area
+        closed_area = base.mark_area(
+            color='#2ecc71',
+            opacity=0.8,
+            line={'color': '#27ae60'}
+        ).encode(
+            tooltip=[
+                alt.Tooltip('Date:T', title='Date'),
+                alt.Tooltip('Cumulative:Q', title='Cumulative Profit', format='$.2f'),
+                alt.Tooltip('Profit:Q', title='Daily Profit', format='$.2f')
+            ]
+        )
+        
+        # Add points for each data point
+        points = base.mark_circle(
+            color='#27ae60',
+            size=60,
+            opacity=1
+        ).encode(
+            tooltip=[
+                alt.Tooltip('Date:T', title='Date'),
+                alt.Tooltip('Cumulative:Q', title='Cumulative Profit', format='$.2f'),
+                alt.Tooltip('Profit:Q', title='Daily Profit', format='$.2f')
+            ]
+        )
+        
+        chart = (closed_area + points).properties(
+            height=400,
+            title='Daily Betting Performance'
+        )
+        
+        return chart
+    
+    return alt.Chart().mark_text(text='No data available')
 
-    st.session_state.history.append(entry)
-
-def calculate_win_percentage() -> float:
-    """Calculate win percentage from bet history."""
-    if not st.session_state.history:
-        return 0.0
-    wins = sum(1 for b in st.session_state.history if b["Result"] == "WIN")
-    total = len(st.session_state.history)
-    return (wins / total) * 100
-
-def calculate_potential_outcomes():
-    """Calculate total potential winnings and losses."""
-    total_loss = 0.0
-    total_win = 0.0
-
-    for bet in st.session_state.history:
-        total_loss += bet["Amount"]
-
-        if bet["Odds"] > 0:
-            profit = (bet["Odds"] / 100.0) * bet["Amount"]
-        else:
-            profit = (100.0 / abs(bet["Odds"])) * bet["Amount"]
-
-        total_win += profit
-
-    return round(total_win, 2), round(total_loss, 2)
-
-
-# ----------------------------
-# Main app
-# ----------------------------
+# In the main function, add these UI elements before the bet entry form:
 def main():
-    st.set_page_config(page_title="Bet Tracker", page_icon="🎯")
-    st.title("Bet Tracker")
-    init_state()
+    # ... existing imports and setup ...
+    
+    st.sidebar.header("Import Historical Data")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload CSV with columns: amount, odds, result, date",
+        type=['csv']
+    )
+    
+    if uploaded_file is not None:
+        historical_bets = process_csv_upload(uploaded_file)
+        if historical_bets:
+            st.session_state.history.extend(historical_bets)
+            st.sidebar.success(f"Successfully imported {len(historical_bets)} historical bets")
+    
+    # ... rest of the existing main function ...
 
-    st.write("Enter your bets: **Amount**, **Odds (American)**, and **Result (+ for win, - for loss)**")
-
-    # Input fields with unique keys
-    col1, col2, col3 = st.columns([1,1,1])
-    with col1:
-        amount = st.number_input("Amount ($)", min_value=0.0, step=5.0, format="%.2f", value=50.0, key="amount_input")
-    with col2:
-        odds = st.number_input("Odds (American)", value=-110.0, format="%.0f", key="odds_input")
-    with col3:
-        result = st.selectbox("Result", options=["+", "-"], format_func=lambda s: "Win (+)" if s == "+" else "Loss (-)", key="result_input")
-
-    # Buttons
-    submit = st.button("Submit Bet", key="submit_btn")
-    reset_btn = st.button("Reset All", key="reset_btn")
-
-    if submit:
-        record_bet(amount=float(amount), odds=float(odds), result=result)
-
-    if reset_btn:
-        reset_all()
-
-    # Display metrics
-    st.markdown("---")
-    st.header("Summary")
-    col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Total Returns", f"${st.session_state.total_returns:.2f}")
-    col_b.metric("Total Position", f"${st.session_state.total_position:.2f}")
-    col_c.metric("Available Credit", f"${st.session_state.available_credit:.2f}")
-    col_d.metric("Win %", f"{calculate_win_percentage():.2f}%")
-
-    st.markdown("---")
-    st.header("Potential Outcomes")
-
+    # Add the daily performance chart after the potential outcomes section
     if st.session_state.history:
-        potential_win, potential_loss = calculate_potential_outcomes()
-
-        chart_data = pd.DataFrame({
-            "Type": ["Potential Winnings", "Potential Losses"],
-            "Amount": [potential_win, -potential_loss]  # Losses negative
-        })
-
-        chart = (
-            alt.Chart(chart_data)
-            .mark_bar(size=40)
-            .encode(
-                x=alt.X("Amount:Q", title="Amount ($)"),
-                y=alt.value(50),  # Single horizontal line
-                color=alt.Color(
-                    "Amount:Q",
-                    scale=alt.Scale(
-                        domain=[-max(potential_loss, potential_win), max(potential_loss, potential_win)],
-                        range=["#ff4d4d", "#2ecc71"]
-                    ),
-                    legend=None
-                )
-            )
-            .properties(height=80)
+        st.markdown("---")
+        st.header("Daily Performance")
+        chart = plot_daily_performance(
+            closed_bets=[b for b in st.session_state.history if b.get('Status') == 'CLOSED'],
+            open_bets=[b for b in st.session_state.history if b.get('Status') != 'CLOSED']
         )
-
         st.altair_chart(chart, use_container_width=True)
-
-        st.caption(
-            f"Max upside: **${potential_win:.2f}** | "
-            f"Max downside: **-${potential_loss:.2f}**"
-        )
-    else:
-        st.info("Add bets to see potential winnings and losses.")
-
-
-
-
-    # Display bet history in a container
-    st.markdown("---")
-    st.header("Bet History")
-    if st.session_state.history:
-        # Header
-        header_cols = st.columns([1,1,1,1,1,0.5])
-        header_cols[0].write("Amount")
-        header_cols[1].write("Odds")
-        header_cols[2].write("Result")
-        header_cols[3].write("Payout")
-        header_cols[4].write("Profit")
-        header_cols[5].write("🗑️")
-
-        # Track rows to delete
-        rows_to_delete = []
-
-        for i, bet in enumerate(st.session_state.history):
-            row_cols = st.columns([1,1,1,1,1,0.5])
-            row_cols[0].write(f"${bet['Amount']:.2f}")
-            row_cols[1].write(f"{bet['Odds']}")
-            row_cols[2].write(f"{bet['Result']}")
-            row_cols[3].write(f"${bet['Payout']:.2f}")
-            row_cols[4].write(f"${bet['Profit']:.2f}")
-
-            if row_cols[5].button("🗑️", key=f"delete_{i}"):
-                rows_to_delete.append(i)
-
-        # Delete rows in reverse order to not break indices
-        if rows_to_delete:
-            for i in reversed(rows_to_delete):
-                bet = st.session_state.history.pop(i)
-                st.session_state.total_position -= bet["Amount"]
-                st.session_state.total_returns -= bet["Profit"]
-                st.session_state.available_credit -= bet["Payout"]
-                st.info(f"Removed bet: {bet['Result']} of ${bet['Amount']:.2f}")
-
-        # CSV download
-        df = pd.DataFrame(st.session_state.history)
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download History CSV", csv, "bet_history.csv", "text/csv")
-    else:
-        st.info("No bets recorded yet.")
-
-if __name__ == "__main__":
-    main()
