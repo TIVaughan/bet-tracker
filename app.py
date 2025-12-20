@@ -203,9 +203,9 @@ def main():
     init_state()
 
     # Add CSV upload in sidebar
-    st.sidebar.header("Import Historical Data")
+    st.sidebar.header("Import Betting Data")
     uploaded_file = st.sidebar.file_uploader(
-        "Upload CSV with columns: amount, odds, result, date",
+        "Upload Betting CSV",
         type=['csv']
     )
     
@@ -213,92 +213,68 @@ def main():
         historical_bets = process_csv_upload(uploaded_file)
         if historical_bets:
             st.session_state.history.extend(historical_bets)
-            st.sidebar.success(f"Successfully imported {len(historical_bets)} historical bets")
+            st.sidebar.success(f"Successfully imported {len(historical_bets)} bets")
+
+    # Calculate metrics
+    closed_bets = [b for b in st.session_state.history if b.get('Status') == 'CLOSED']
+    open_bets = [b for b in st.session_state.history if b.get('Status') == 'OPEN']
     
-    # Bet entry form
-    st.write("Enter your bets: **Amount**, **Odds (American)**, and **Result**")
-    col1, col2, col3 = st.columns([1,1,1])
-    with col1:
-        amount = st.number_input("Amount ($)", min_value=0.0, step=5.0, format="%.2f", value=50.0, key="amount_input")
-    with col2:
-        odds = st.number_input("Odds (American)", value=-110.0, format="%.0f", key="odds_input")
-    with col3:
-        result = st.selectbox("Result", options=["+", "-", "Open"], 
-                            format_func=lambda s: {"+": "Win (+)", "-": "Loss (-)", "Open": "Open"}.get(s, s), 
-                            key="result_input")
-
-    # Buttons
-    submit = st.button("Submit Bet", key="submit_btn")
-    reset_btn = st.button("Reset All", key="reset_btn")
-
-    if submit:
-        if result == "Open":
-            # Add to open bets
-            bet = {
-                "Amount": amount,
-                "Odds": odds,
-                "Result": "PENDING",
-                "Date": datetime.now().date(),
-                "Status": "OPEN"
-            }
-            st.session_state.open_bets.append(bet)
-            st.success(f"Added open bet: ${amount:.2f} at {odds} odds")
-        else:
-            # Add to closed bets
-            bet = {
-                "Amount": amount,
-                "Odds": odds,
-                "Result": "WIN" if result == "+" else "LOSS",
-                "Date": datetime.now().date(),
-                "Status": "CLOSED"
-            }
-            st.session_state.history.append(bet)
-            st.success(f"Added {bet['Result']} bet: ${amount:.2f} at {odds} odds")
-
-    if reset_btn:
-        st.session_state.total_position = 0.0
-        st.session_state.total_returns = 0.0
-        st.session_state.available_credit = 0.0
-        st.session_state.history = []
-        st.session_state.open_bets = []
-        st.success("All bets have been reset!")
-
+    # Get current month's data
+    current_month = pd.Timestamp.now().replace(day=1).date()
+    mtd_closed = [b for b in closed_bets if pd.to_datetime(b['Date']).date() >= current_month]
+    
+    # Calculate metrics
+    total_returns = sum(b['Profit'] for b in mtd_closed)
+    total_position = sum(b['Amount'] for b in open_bets)
+    
     # Display metrics
     st.markdown("---")
-    st.header("Summary")
-    col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Total Returns", f"${st.session_state.total_returns:.2f}")
-    col_b.metric("Total Position", f"${st.session_state.total_position:.2f}")
-    col_c.metric("Available Credit", f"${st.session_state.available_credit:.2f}")
-    col_d.metric("Open Bets", f"{len(st.session_state.open_bets)}")
+    st.header("Month to Date Summary")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Returns", f"${total_returns:,.2f}")
+    with col2:
+        st.metric("Active Position", f"${total_position:,.2f}")
+    with col3:
+        st.metric("Open Bets", len(open_bets))
 
     # Add the daily performance chart
     st.markdown("---")
-    st.header("Daily Performance")
-    chart = plot_daily_performance(
-        closed_bets=st.session_state.history,
-        open_bets=st.session_state.open_bets
-    )
-    st.altair_chart(chart, use_container_width=True)
+    st.header("Monthly Performance")
+    if mtd_closed or open_bets:
+        chart = plot_daily_performance(
+            closed_bets=mtd_closed,
+            open_bets=open_bets
+        )
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.info("No data available for the current month")
 
     # Display bet history
     st.markdown("---")
     st.header("Bet History")
     
     # Show open bets
-    if st.session_state.open_bets:
-        st.subheader("Open Bets")
-        open_bets_df = pd.DataFrame(st.session_state.open_bets)
-        st.dataframe(open_bets_df, use_container_width=True)
+    if open_bets:
+        st.subheader(f"Open Bets ({len(open_bets)})")
+        open_bets_df = pd.DataFrame(open_bets)
+        st.dataframe(
+            open_bets_df[['Date', 'Player', 'Team', 'BetType', 'Line', 'Amount', 'Odds']],
+            use_container_width=True
+        )
     
     # Show closed bets
-    if st.session_state.history:
-        st.subheader("Closed Bets")
-        history_df = pd.DataFrame(st.session_state.history)
-        st.dataframe(history_df, use_container_width=True)
+    if closed_bets:
+        st.subheader(f"Closed Bets ({len(closed_bets)})")
+        closed_bets_df = pd.DataFrame(closed_bets)
+        st.dataframe(
+            closed_bets_df[['Date', 'Player', 'Team', 'BetType', 'Line', 'Amount', 'Odds', 'Result', 'Profit']],
+            use_container_width=True
+        )
         
         # Add download button
-        csv = history_df.to_csv(index=False).encode('utf-8')
+        csv = closed_bets_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             "Download History as CSV",
             csv,
@@ -306,8 +282,8 @@ def main():
             "text/csv",
             key='download-csv'
         )
-    elif not st.session_state.open_bets:
-        st.info("No bets recorded yet. Add bets to see them here.")
+    elif not open_bets:
+        st.info("No bets recorded yet. Upload a CSV to get started.")
 
 if __name__ == "__main__":
     main()
