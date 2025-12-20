@@ -221,11 +221,28 @@ def main():
     
     # Get current month's data
     current_month = pd.Timestamp.now().replace(day=1).date()
-    mtd_closed = [b for b in closed_bets if pd.to_datetime(b['Date']).date() >= current_month]
     
-    # Calculate metrics
-    total_returns = sum(b['Profit'] for b in mtd_closed)
-    total_position = sum(b['Amount'] for b in open_bets)
+    # Convert dates to datetime.date objects if they're strings
+    def parse_date(date_val):
+        if isinstance(date_val, str):
+            try:
+                return pd.to_datetime(date_val).date()
+            except:
+                return None
+        elif hasattr(date_val, 'date'):
+            return date_val.date() if hasattr(date_val, 'date') else date_val
+        return date_val
+    
+    # Filter for current month's closed bets
+    mtd_closed = []
+    for bet in closed_bets:
+        bet_date = parse_date(bet.get('Date'))
+        if bet_date and bet_date >= current_month:
+            mtd_closed.append(bet)
+    
+    # Calculate metrics with proper type handling
+    total_returns = sum(float(b.get('Profit', 0)) for b in mtd_closed)
+    total_position = sum(float(b.get('Amount', 0)) for b in open_bets)
     
     # Display metrics
     st.markdown("---")
