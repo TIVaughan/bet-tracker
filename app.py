@@ -130,15 +130,15 @@ def main():
 
         chart_data = pd.DataFrame({
             "Type": ["Potential Winnings", "Potential Losses"],
-            "Amount": [potential_win, -potential_loss]  # losses are negative
+            "Amount": [potential_win, -potential_loss]  # Losses negative
         })
 
         chart = (
             alt.Chart(chart_data)
-            .mark_bar()
+            .mark_bar(size=40)
             .encode(
-                x=alt.X("Amount:Q", title="Amount ($)", axis=alt.Axis(format="$")),
-                y=alt.Y("Type:N", sort=None, title=None),
+                x=alt.X("Amount:Q", title="Amount ($)"),
+                y=alt.value(50),  # Single horizontal line
                 color=alt.Color(
                     "Amount:Q",
                     scale=alt.Scale(
@@ -148,7 +148,7 @@ def main():
                     legend=None
                 )
             )
-            .properties(height=120)
+            .properties(height=80)
         )
 
         st.altair_chart(chart, use_container_width=True)
@@ -159,6 +159,7 @@ def main():
         )
     else:
         st.info("Add bets to see potential winnings and losses.")
+
 
 
 
