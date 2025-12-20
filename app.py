@@ -28,18 +28,38 @@ def process_csv_upload(uploaded_file) -> List[BetEntry]:
     try:
         df = pd.read_csv(uploaded_file)
         # Ensure required columns exist
-        required_columns = ['amount', 'odds', 'result', 'date']
+        required_columns = ['date', 'amount_usd', 'price', 'outcome', 'outcome_amount']
         if not all(col in df.columns for col in required_columns):
             st.error(f"CSV must contain columns: {', '.join(required_columns)}")
             return []
         
         bets = []
         for _, row in df.iterrows():
+            # Skip rows with no outcome (pending bets)
+            if pd.isna(row['outcome']):
+                continue
+                
+            # Determine result (win/loss) and profit/loss
+            result = "WIN" if row['outcome'] == 'win' else "LOSS"
+            if result == "WIN":
+                profit = row['outcome_amount'] - row['amount_usd']
+                payout = row['outcome_amount']
+            else:
+                profit = -row['amount_usd']
+                payout = 0.0
+                
             bet = {
-                "Amount": float(row['amount']),
-                "Odds": float(row['odds']),
-                "Result": "WIN" if str(row['result']).strip().upper() in ['WIN', 'W', '1', 'TRUE'] else "LOSS",
                 "Date": pd.to_datetime(row['date']).date(),
+                "Amount": float(row['amount_usd']),
+                "Odds": float(row['price']),
+                "Result": result,
+                "Payout": round(payout, 2),
+                "Profit": round(profit, 2),
+                "Player": row.get('player', ''),
+                "Team": row.get('team', ''),
+                "Position": row.get('position', ''),
+                "Line": row.get('line', ''),
+                "BetType": row.get('transaction_type', ''),
                 "Status": "CLOSED"
             }
             bets.append(bet)
