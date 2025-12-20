@@ -125,40 +125,40 @@ def main():
     st.markdown("---")
     st.header("Potential Outcomes")
 
-if st.session_state.history:
-    potential_win, potential_loss = calculate_potential_outcomes()
+    if st.session_state.history:
+        potential_win, potential_loss = calculate_potential_outcomes()
 
-    chart_data = pd.DataFrame({
-        "Type": ["Potential Winnings", "Potential Losses"],
-        "Amount": [potential_win, -potential_loss]  # losses are negative
-    })
+        chart_data = pd.DataFrame({
+            "Type": ["Potential Winnings", "Potential Losses"],
+            "Amount": [potential_win, -potential_loss]  # losses are negative
+        })
 
-    chart = (
-        alt.Chart(chart_data)
-        .mark_bar()
-        .encode(
-            x=alt.X("Amount:Q", title="Amount ($)", axis=alt.Axis(format="$")),
-            y=alt.Y("Type:N", sort=None, title=None),
-            color=alt.Color(
-                "Amount:Q",
-                scale=alt.Scale(
-                    domain=[-max(potential_loss, potential_win), max(potential_loss, potential_win)],
-                    range=["#ff4d4d", "#2ecc71"]
-                ),
-                legend=None
+        chart = (
+            alt.Chart(chart_data)
+            .mark_bar()
+            .encode(
+                x=alt.X("Amount:Q", title="Amount ($)", axis=alt.Axis(format="$")),
+                y=alt.Y("Type:N", sort=None, title=None),
+                color=alt.Color(
+                    "Amount:Q",
+                    scale=alt.Scale(
+                        domain=[-max(potential_loss, potential_win), max(potential_loss, potential_win)],
+                        range=["#ff4d4d", "#2ecc71"]
+                    ),
+                    legend=None
+                )
             )
+            .properties(height=120)
         )
-        .properties(height=120)
-    )
 
-    st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, use_container_width=True)
 
-    st.caption(
-        f"Max upside: **${potential_win:.2f}** | "
-        f"Max downside: **-${potential_loss:.2f}**"
-    )
-else:
-    st.info("Add bets to see potential winnings and losses.")
+        st.caption(
+            f"Max upside: **${potential_win:.2f}** | "
+            f"Max downside: **-${potential_loss:.2f}**"
+        )
+    else:
+        st.info("Add bets to see potential winnings and losses.")
 
 
 
