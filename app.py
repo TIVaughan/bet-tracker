@@ -255,8 +255,15 @@ def main():
     for bet in closed_bets:
         bet_date = parse_date(bet.get('Date'))
         st.sidebar.write(f"Bet date: {bet_date} (type: {type(bet_date)})")
-        if bet_date and isinstance(bet_date, (pd.Timestamp, datetime.date)) and bet_date >= current_month:
-            mtd_closed.append(bet)
+        if bet_date is None:
+            continue
+            
+        # Convert to date if it's a datetime
+        if hasattr(bet_date, 'date'):
+            bet_date = bet_date.date()
+            
+        # Compare dates directly
+        if isinstance(bet_date, datetim
 
     # Calculate metrics with proper type handling
     total_returns = 0.0
