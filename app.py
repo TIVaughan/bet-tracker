@@ -77,40 +77,61 @@ def process_csv_upload(uploaded_file) -> List[BetEntry]:
         st.error(f"Error processing CSV: {str(e)}")
         return []
 
-def get_daily_metrics(bets: List[BetEntry]) -> pd.DataFrame:
-    """Calculate daily metrics from bet history."""
+def get_daily_metrics(bets: List[BetEntry], month_to_date: bool = True) -> pd.DataFrame:
+    """Calculate daily metrics from bet history.
+    
+    Args:
+        bets: List of bet entries
+        month_to_date: If True, only include data from the current month
+    """
     if not bets:
         return pd.DataFrame()
     
     df = pd.DataFrame(bets)
-    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Convert Date to datetime if it's not already
+    if not pd.api.types.is_datetime64_any_dtype(df['Date']):
+        df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Filter for current month if month_to_date is True
+    if month_to_date:
+        current_month = pd.Timestamp.now().replace(day=1)
+        df = df[df['Date'] >= current_month]
+    
+    # Calculate profit for each bet
     df['Profit'] = df.apply(
-        lambda x: (calculate_payout(x['Odds'], x['Amount']) - x['Amount']) 
-        if x['Result'] == 'WIN' else -x['Amount'], 
+        lambda x: x['Payout'] - x['Amount'] if x['Result'] == 'WIN' else -x['Amount'],
         axis=1
     )
     
+    # Group by date and calculate metrics
     daily = df.groupby('Date').agg({
         'Profit': 'sum',
-        'Amount': 'count'
+        'Amount': 'sum'
     }).reset_index()
     
+    # Calculate running total
     daily['Cumulative'] = daily['Profit'].cumsum()
+    
     return daily
-
 def plot_daily_performance(closed_bets: List[BetEntry], open_bets: List[BetEntry] = None) -> alt.Chart:
     """Create an area chart showing daily performance."""
-    # Process closed bets
-    closed_df = get_daily_metrics(closed_bets) if closed_bets else pd.DataFrame()
+    # Process closed bets for current month
+    closed_df = get_daily_metrics(closed_bets, month_to_date=True)
+    
+    # Process open bets for current month
+    open_df = get_daily_metrics(open_bets, month_to_date=True) if open_bets else pd.DataFrame()
     
     # Create base chart
-    base = alt.Chart(closed_df).encode(
+    base = alt.Chart().encode(
         x=alt.X('Date:T', title='Date'),
         y=alt.Y('Cumulative:Q', title='Cumulative Profit ($)')
     )
     
+    charts = []
+    
+    # Add closed bets area if we have data
     if not closed_df.empty:
-        # Add closed bets area
         closed_area = base.mark_area(
             color='#2ecc71',
             opacity=0.8,
@@ -121,10 +142,9 @@ def plot_daily_performance(closed_bets: List[BetEntry], open_bets: List[BetEntry
                 alt.Tooltip('Cumulative:Q', title='Cumulative Profit', format='$.2f'),
                 alt.Tooltip('Profit:Q', title='Daily Profit', format='$.2f')
             ]
-        )
+        ).transform_filter(alt.datum.Cumulative != 0)
         
-        # Add points for closed bets
-        points = base.mark_circle(
+        closed_points = base.mark_circle(
             color='#27ae60',
             size=60,
             opacity=1
@@ -134,15 +154,48 @@ def plot_daily_performance(closed_bets: List[BetEntry], open_bets: List[BetEntry
                 alt.Tooltip('Cumulative:Q', title='Cumulative Profit', format='$.2f'),
                 alt.Tooltip('Profit:Q', title='Daily Profit', format='$.2f')
             ]
-        )
+        ).transform_filter(alt.datum.Cumulative != 0)
         
-        chart = (closed_area + points).properties(
+        charts.extend([closed_area, closed_points])
+    
+    # Add open bets area if we have data
+    if not open_df.empty:
+        open_area = base.mark_area(
+            color='#3498db',
+            opacity=0.4,
+            interpolate='monotone'
+        ).encode(
+            tooltip=[
+                alt.Tooltip('Date:T', title='Date'),
+                alt.Tooltip('Cumulative:Q', title='Potential Cumulative', format='$.2f'),
+                alt.Tooltip('Profit:Q', title='Potential Daily', format='$.2f')
+            ]
+        ).transform_filter(alt.datum.Cumulative != 0)
+        
+        open_points = base.mark_triangle(
+            color='#2980b9',
+            size=100,
+            opacity=0.8
+        ).encode(
+            tooltip=[
+                alt.Tooltip('Date:T', title='Date'),
+                alt.Tooltip('Cumulative:Q', title='Potential Cumulative', format='$.2f'),
+                alt.Tooltip('Profit:Q', title='Potential Daily', format='$.2f')
+            ]
+        ).transform_filter(alt.datum.Cumulative != 0)
+        
+        charts.extend([open_area, open_points])
+    
+    if charts:
+        # Use the appropriate dataframe (prefer closed_df if available)
+        data = closed_df if not closed_df.empty else open_df
+        chart = alt.layer(*charts, data=data).properties(
             height=400,
-            title='Daily Betting Performance'
+            title='Monthly Performance (MTD)'
         )
         return chart
     
-    return alt.Chart().mark_text(text='No data available')
+    return alt.Chart().mark_text(text='No data available for current month')
 
 def main():
     st.set_page_config(page_title="Bet Tracker", page_icon="🎯")
