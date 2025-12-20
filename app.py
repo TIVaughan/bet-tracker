@@ -225,86 +225,30 @@ def main():
     closed_bets = [b for b in st.session_state.history if b.get('Status') == 'CLOSED']
     open_bets = [b for b in st.session_state.history if b.get('Status') == 'OPEN']
 
-    # Debug: Show counts
-    st.sidebar.write(f"Total bets: {len(st.session_state.history)}")
-    st.sidebar.write(f"Closed bets: {len(closed_bets)}")
-    st.sidebar.write(f"Open bets: {len(open_bets)}")
-
     # Get current month's data
     current_month = pd.Timestamp.now().replace(day=1).date()
-    st.sidebar.write(f"Current month: {current_month}")
+    st.sidebar.write(f"Current month: {current_month} (type: {type(current_month)})")
 
-    # Convert dates to datetime.date objects if they're strings
-    def parse_date(date_val):
-        if date_val is None:
-            return None
-        try:
-            if isinstance(date_val, str):
-                return pd.to_datetime(date_val).date()
-            elif hasattr(date_val, 'date'):
-                return date_val.date()
-            elif hasattr(date_val, 'to_pydatetime'):
-                return date_val.to_pydatetime().date()
-            return date_val
-        except Exception as e:
-            st.sidebar.error(f"Error parsing date {date_val}: {str(e)}")
-            return None
-
-    # Filter for current month's closed bets
-    # Filter for current month's closed bets
+    # Convert dates and filter for current month
     mtd_closed = []
     for bet in closed_bets:
-        bet_date = parse_date(bet.get('Date'))
-        st.sidebar.write(f"Bet date: {bet_date} (type: {type(bet_date)})")
-        if bet_date is None:
-            continue
-            
-        # Debug output
-        st.sidebar.write(f"Before conversion - bet_date: {bet_date} (type: {type(bet_date)})")
-        st.sidebar.write(f"current_month: {current_month} (type: {type(current_month)})")
-            
-        # Convert to date if it's a datetime
-        if hasattr(bet_date, 'date'):
-            bet_date = bet_date.date()
-            st.sidebar.write(f"After date() - bet_date: {bet_date} (type: {type(bet_date)})")
-            
-        # Ensure current_month is a date object
-        if hasattr(current_month, 'date'):
-            current_month_date = current_month.date()
-        else:
-            current_month_date = current_month
-        st.sidebar.write(f"current_month_date: {current_month_date} (type: {type(current_month_date)})")
-                    
-        # Compare dates directly
         try:
-            if bet_date >= current_month_date:
+            bet_date = bet.get('Date')
+            if isinstance(bet_date, str):
+                bet_date = pd.to_datetime(bet_date).date()
+            elif hasattr(bet_date, 'date'):
+                bet_date = bet_date.date()
+            
+            st.sidebar.write(f"Processing bet date: {bet_date} (type: {type(bet_date)})")
+            
+            if bet_date and bet_date >= current_month:
                 mtd_closed.append(bet)
         except Exception as e:
-            st.sidebar.error(f"Error comparing dates: {e}")
-            st.sidebar.error(f"bet_date: {bet_date} ({type(bet_date)})")
-            st.sidebar.error(f"current_month_date: {current_month_date} ({type(current_month_date)})")
+            st.sidebar.error(f"Error processing bet date {bet.get('Date')}: {e}")
 
-    # Calculate metrics with proper type handling
-    total_returns = 0.0
-    for bet in mtd_closed:
-        try:
-            profit = float(bet.get('Profit', 0))
-            st.sidebar.write(f"Bet profit: {profit} (type: {type(profit)})")
-            total_returns += profit
-        except (TypeError, ValueError) as e:
-            st.sidebar.error(f"Error processing profit for bet: {e}")
-
-    total_position = 0.0
-    for bet in open_bets:
-        try:
-            amount = float(bet.get('Amount', 0))
-            st.sidebar.write(f"Open bet amount: {amount} (type: {type(amount)})")
-            total_position += amount
-        except (TypeError, ValueError) as e:
-            st.sidebar.error(f"Error processing amount for open bet: {e}")
-
-    st.sidebar.write(f"Calculated total_returns: {total_returns}")
-    st.sidebar.write(f"Calculated total_position: {total_position}")
+    # Calculate metrics
+    total_returns = sum(float(b.get('Profit', 0)) for b in mtd_closed)
+    total_position = sum(float(b.get('Amount', 0)) for b in open_bets)
 
     # Display metrics
     st.markdown("---")
@@ -318,7 +262,51 @@ def main():
     with col3:
         st.metric("Open Bets", len(open_bets))
 
-    # Rest of your code remains the same...
+    # Add the chart
+    st.markdown("---")
+    st.header("Monthly Performance")
+    if mtd_closed or open_bets:
+        chart = plot_daily_performance(
+            closed_bets=mtd_closed,
+            open_bets=open_bets
+        )
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.info("No data available for the current month")
+
+    # Display bet history
+    st.markdown("---")
+    st.header("Bet History")
+    
+    # Show open bets
+    if open_bets:
+        st.subheader(f"Open Bets ({len(open_bets)})")
+        open_bets_df = pd.DataFrame(open_bets)
+        st.dataframe(
+            open_bets_df[['Date', 'Player', 'Team', 'BetType', 'Line', 'Amount', 'Odds']],
+            use_container_width=True
+        )
+    
+    # Show closed bets
+    if closed_bets:
+        st.subheader(f"Closed Bets ({len(closed_bets)})")
+        closed_bets_df = pd.DataFrame(closed_bets)
+        st.dataframe(
+            closed_bets_df[['Date', 'Player', 'Team', 'BetType', 'Line', 'Amount', 'Odds', 'Result', 'Profit']],
+            use_container_width=True
+        )
+        
+        # Add download button
+        csv = closed_bets_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "Download History as CSV",
+            csv,
+            "bet_history.csv",
+            "text/csv",
+            key='download-csv'
+        )
+    elif not open_bets:
+        st.info("No bets recorded yet. Upload a CSV to get started.")
 
 if __name__ == "__main__":
     main()
