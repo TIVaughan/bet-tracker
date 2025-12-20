@@ -115,88 +115,121 @@ def get_daily_metrics(bets: List[BetEntry], month_to_date: bool = True) -> pd.Da
     
     return daily
 
+def calculate_potential(amount: float, odds: float) -> float:
+    """Calculate potential winnings for American odds."""
+    if odds > 0:
+        return amount * (odds / 100)
+    else:
+        return amount / (abs(odds) / 100)
 def plot_daily_performance(closed_bets: List[BetEntry], open_bets: List[BetEntry] = None) -> alt.Chart:
-    """Create an area chart showing daily performance."""
-    # Process closed bets for current month
-    closed_df = get_daily_metrics(closed_bets, month_to_date=True)
+    """Create an area chart showing daily performance with future projections."""
+    # Process closed bets
+    closed_df = pd.DataFrame(closed_bets)
+    if not closed_df.empty:
+        closed_df['Date'] = pd.to_datetime(closed_df['Date'])
+        closed_df['Type'] = 'Actual'
+        closed_df['Cumulative'] = closed_df['Profit'].cumsum()
     
-    # Process open bets for current month
-    open_df = get_daily_metrics(open_bets, month_to_date=True) if open_bets else pd.DataFrame()
+    # Process open bets
+    open_df = pd.DataFrame(open_bets) if open_bets else pd.DataFrame()
+    if not open_df.empty:
+        open_df['Date'] = pd.to_datetime(open_df['Date'])
+        open_df['Type'] = 'Projected'
+        open_df['Potential_Win'] = open_df.apply(
+            lambda x: calculate_potential(x['Amount'], x['Odds']), axis=1
+        )
+        open_df['Potential_Loss'] = -open_df['Amount']
+        
+        # Group by date and calculate daily totals
+        open_daily = open_df.groupby('Date').agg({
+            'Potential_Win': 'sum',
+            'Potential_Loss': 'sum'
+        }).reset_index()
+        open_daily['Cumulative'] = open_daily['Potential_Win'] + open_daily['Potential_Loss']
     
     # Create base chart
     base = alt.Chart().encode(
         x=alt.X('Date:T', title='Date'),
-        y=alt.Y('Cumulative:Q', title='Cumulative Profit ($)')
+        color=alt.Color('Type:N', 
+                       scale=alt.Scale(domain=['Actual', 'Projected'], 
+                                     range=['#2ecc71', '#3498db']),
+                       legend=alt.Legend(title="Data Type"))
     )
     
     charts = []
     
-    # Add closed bets area if we have data
+    # Add closed bets area
     if not closed_df.empty:
+        # Closed bets area
         closed_area = base.mark_area(
-            color='#2ecc71',
-            opacity=0.8,
+            opacity=0.6,
             interpolate='monotone'
         ).encode(
-            tooltip=[
-                alt.Tooltip('Date:T', title='Date'),
-                alt.Tooltip('Cumulative:Q', title='Cumulative Profit', format='$.2f'),
-                alt.Tooltip('Profit:Q', title='Daily Profit', format='$.2f')
-            ]
-        ).transform_filter(alt.datum.Cumulative != 0)
+            y=alt.Y('Cumulative:Q', title='Cumulative Returns ($)'),
+            color=alt.condition(
+                alt.datum.Cumulative >= 0,
+                alt.value('#2ecc71'),  # Green for positive
+                alt.value('#e74c3c')   # Red for negative
+            )
+        ).transform_filter(alt.datum.Type == 'Actual')
         
-        closed_points = base.mark_circle(
+        # Closed bets line
+        closed_line = base.mark_line(
             color='#27ae60',
-            size=60,
-            opacity=1
+            size=2
         ).encode(
-            tooltip=[
-                alt.Tooltip('Date:T', title='Date'),
-                alt.Tooltip('Cumulative:Q', title='Cumulative Profit', format='$.2f'),
-                alt.Tooltip('Profit:Q', title='Daily Profit', format='$.2f')
-            ]
-        ).transform_filter(alt.datum.Cumulative != 0)
+            y=alt.Y('Cumulative:Q')
+        ).transform_filter(alt.datum.Type == 'Actual')
         
-        charts.extend([closed_area, closed_points])
+        charts.extend([closed_area, closed_line])
     
-    # Add open bets area if we have data
+    # Add open bets projections
     if not open_df.empty:
-        open_area = base.mark_area(
-            color='#3498db',
-            opacity=0.4,
+        # Projected wins area
+        win_area = base.mark_area(
+            opacity=0.3,
             interpolate='monotone'
         ).encode(
-            tooltip=[
-                alt.Tooltip('Date:T', title='Date'),
-                alt.Tooltip('Cumulative:Q', title='Potential Cumulative', format='$.2f'),
-                alt.Tooltip('Profit:Q', title='Potential Daily', format='$.2f')
-            ]
-        ).transform_filter(alt.datum.Cumulative != 0)
+            y=alt.Y('Cumulative:Q'),
+            color=alt.value('#3498db')
+        ).transform_filter(alt.datum.Type == 'Projected')
         
-        open_points = base.mark_triangle(
+        # Projected line
+        proj_line = base.mark_line(
             color='#2980b9',
-            size=100,
-            opacity=0.8
+            size=2,
+            strokeDash=[3, 3]
         ).encode(
-            tooltip=[
-                alt.Tooltip('Date:T', title='Date'),
-                alt.Tooltip('Cumulative:Q', title='Potential Cumulative', format='$.2f'),
-                alt.Tooltip('Profit:Q', title='Potential Daily', format='$.2f')
-            ]
-        ).transform_filter(alt.datum.Cumulative != 0)
+            y=alt.Y('Cumulative:Q')
+        ).transform_filter(alt.datum.Type == 'Projected')
         
-        charts.extend([open_area, open_points])
+        charts.extend([win_area, proj_line])
     
     if charts:
-        # Use the appropriate dataframe (prefer closed_df if available)
-        data = closed_df if not closed_df.empty else open_df
-        chart = alt.layer(*charts, data=data).properties(
+        # Combine data
+        if not closed_df.empty and not open_df.empty:
+            # Find the last actual cumulative value
+            last_actual = closed_df['Cumulative'].iloc[-1]
+            open_daily['Cumulative'] += last_actual
+            combined_df = pd.concat([closed_df, open_daily], ignore_index=True)
+        elif not closed_df.empty:
+            combined_df = closed_df
+        else:
+            combined_df = open_daily
+        
+        # Create the final chart
+        chart = alt.layer(*charts, data=combined_df).properties(
             height=400,
-            title='Monthly Performance (MTD)'
+            title='Performance with Projections'
+        ).configure_axisY(
+            gridColor='#eee'
+        ).configure_view(
+            strokeWidth=0
         )
+        
         return chart
     
-    return alt.Chart().mark_text(text='No data available for current month')
+    return alt.Chart().mark_text(text='No data available')
 
 def main():
     st.set_page_config(page_title="Bet Tracker", page_icon="🎯")
@@ -264,7 +297,7 @@ def main():
 
     # Add the chart
     st.markdown("---")
-    st.header("Monthly Performance")
+    st.header("Performance & Projections")
     if mtd_closed or open_bets:
         chart = plot_daily_performance(
             closed_bets=mtd_closed,
@@ -272,7 +305,7 @@ def main():
         )
         st.altair_chart(chart, use_container_width=True)
     else:
-        st.info("No data available for the current month")
+        st.info("No data available")
 
     # Display bet history
     st.markdown("---")
