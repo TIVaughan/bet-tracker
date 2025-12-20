@@ -1,6 +1,8 @@
 # app.py
 import streamlit as st
 import pandas as pd
+import altair as alt
+
 
 # ----------------------------
 # Helper functions
@@ -64,6 +66,24 @@ def calculate_win_percentage() -> float:
     total = len(st.session_state.history)
     return (wins / total) * 100
 
+def calculate_potential_outcomes():
+    """Calculate total potential winnings and losses."""
+    total_loss = 0.0
+    total_win = 0.0
+
+    for bet in st.session_state.history:
+        total_loss += bet["Amount"]
+
+        if bet["Odds"] > 0:
+            profit = (bet["Odds"] / 100.0) * bet["Amount"]
+        else:
+            profit = (100.0 / abs(bet["Odds"])) * bet["Amount"]
+
+        total_win += profit
+
+    return round(total_win, 2), round(total_loss, 2)
+
+
 # ----------------------------
 # Main app
 # ----------------------------
@@ -101,6 +121,44 @@ def main():
     col_b.metric("Total Position", f"${st.session_state.total_position:.2f}")
     col_c.metric("Available Credit", f"${st.session_state.available_credit:.2f}")
     col_d.metric("Win %", f"{calculate_win_percentage():.2f}%")
+
+    st.markdown("---")
+    st.header("Potential Outcomes")
+
+    if st.session_state.history:
+        potential_win, potential_loss = calculate_potential_outcomes()
+
+        chart_data = pd.DataFrame({
+            "Type": ["Potential Winnings", "Potential Losses"],
+            "Amount": [potential_win, potential_loss]
+        })
+
+        chart = (
+            alt.Chart(chart_data)
+            .mark_bar()
+            .encode(
+                x=alt.X("Amount:Q", title="Amount ($)"),
+                y=alt.Y("Type:N", sort=None, title=None),
+                color=alt.Color(
+                    "Amount:Q",
+                    scale=alt.Scale(
+                        range=["#ff4d4d", "#2ecc71"]
+                    ),
+                    legend=None
+                )
+            )
+            .properties(height=120)
+        )
+
+        st.altair_chart(chart, use_container_width=True)
+
+        st.caption(
+            f"Max upside: **${potential_win:.2f}** | "
+            f"Max downside: **-${potential_loss:.2f}**"
+        )
+    else:
+        st.info("Add bets to see potential winnings and losses.")
+
 
     # Display bet history in a container
     st.markdown("---")
