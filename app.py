@@ -26,7 +26,16 @@ def init_state():
 def process_csv_upload(uploaded_file) -> List[BetEntry]:
     """Process uploaded CSV file and return list of bet entries."""
     try:
-        df = pd.read_csv(uploaded_file)
+        # Define the date format in the CSV
+        date_format = "%a %b %d %Y %H:%M:%S GMT+0000 (Coordinated Universal Time)"
+        
+        # Read CSV with explicit date parsing
+        df = pd.read_csv(
+            uploaded_file,
+            parse_dates=['date'],
+            date_parser=lambda x: pd.to_datetime(x, format=date_format)
+        )
+        
         # Ensure required columns exist
         required_columns = ['date', 'amount_usd', 'price', 'outcome', 'outcome_amount']
         if not all(col in df.columns for col in required_columns):
@@ -40,26 +49,26 @@ def process_csv_upload(uploaded_file) -> List[BetEntry]:
                 continue
                 
             # Determine result (win/loss) and profit/loss
-            result = "WIN" if row['outcome'] == 'win' else "LOSS"
+            result = "WIN" if str(row['outcome']).strip().lower() == 'win' else "LOSS"
             if result == "WIN":
-                profit = row['outcome_amount'] - row['amount_usd']
-                payout = row['outcome_amount']
+                profit = float(row['outcome_amount']) - float(row['amount_usd'])
+                payout = float(row['outcome_amount'])
             else:
-                profit = -row['amount_usd']
+                profit = -float(row['amount_usd'])
                 payout = 0.0
                 
             bet = {
-                "Date": pd.to_datetime(row['date']).date(),
+                "Date": row['date'].date(),
                 "Amount": float(row['amount_usd']),
                 "Odds": float(row['price']),
                 "Result": result,
                 "Payout": round(payout, 2),
                 "Profit": round(profit, 2),
-                "Player": row.get('player', ''),
-                "Team": row.get('team', ''),
-                "Position": row.get('position', ''),
-                "Line": row.get('line', ''),
-                "BetType": row.get('transaction_type', ''),
+                "Player": str(row.get('player', '')),
+                "Team": str(row.get('team', '')),
+                "Position": str(row.get('position', '')),
+                "Line": str(row.get('line', '')),
+                "BetType": str(row.get('transaction_type', '')),
                 "Status": "CLOSED"
             }
             bets.append(bet)
