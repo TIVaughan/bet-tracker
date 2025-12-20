@@ -263,7 +263,8 @@ def main():
             bet_date = bet_date.date()
             
         # Compare dates directly
-        if isinstance(bet_date, datetim
+        if isinstance(bet_date, datetime.date) and bet_date >= current_month:
+            mtd_closed.append(bet)
 
     # Calculate metrics with proper type handling
     total_returns = 0.0
