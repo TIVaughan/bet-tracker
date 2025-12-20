@@ -262,8 +262,11 @@ def main():
         if hasattr(bet_date, 'date'):
             bet_date = bet_date.date()
             
+        # Ensure current_month is a date object (not Timestamp)
+        current_month_date = current_month.date() if hasattr(current_month, 'date') else current_month
+                    
         # Compare dates directly
-        if isinstance(bet_date, datetime.date) and bet_date >= current_month:
+        if isinstance(bet_date, (datetime.date, pd.Timestamp)) and bet_date >= current_month_date:
             mtd_closed.append(bet)
 
     # Calculate metrics with proper type handling
