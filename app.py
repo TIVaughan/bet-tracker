@@ -251,6 +251,7 @@ def main():
             return None
 
     # Filter for current month's closed bets
+    # Filter for current month's closed bets
     mtd_closed = []
     for bet in closed_bets:
         bet_date = parse_date(bet.get('Date'))
@@ -258,16 +259,30 @@ def main():
         if bet_date is None:
             continue
             
+        # Debug output
+        st.sidebar.write(f"Before conversion - bet_date: {bet_date} (type: {type(bet_date)})")
+        st.sidebar.write(f"current_month: {current_month} (type: {type(current_month)})")
+            
         # Convert to date if it's a datetime
         if hasattr(bet_date, 'date'):
             bet_date = bet_date.date()
+            st.sidebar.write(f"After date() - bet_date: {bet_date} (type: {type(bet_date)})")
             
-        # Ensure current_month is a date object (not Timestamp)
-        current_month_date = current_month.date() if hasattr(current_month, 'date') else current_month
+        # Ensure current_month is a date object
+        if hasattr(current_month, 'date'):
+            current_month_date = current_month.date()
+        else:
+            current_month_date = current_month
+        st.sidebar.write(f"current_month_date: {current_month_date} (type: {type(current_month_date)})")
                     
         # Compare dates directly
-        if isinstance(bet_date, (datetime.date, pd.Timestamp)) and bet_date >= current_month_date:
-            mtd_closed.append(bet)
+        try:
+            if bet_date >= current_month_date:
+                mtd_closed.append(bet)
+        except Exception as e:
+            st.sidebar.error(f"Error comparing dates: {e}")
+            st.sidebar.error(f"bet_date: {bet_date} ({type(bet_date)})")
+            st.sidebar.error(f"current_month_date: {current_month_date} ({type(current_month_date)})")
 
     # Calculate metrics with proper type handling
     total_returns = 0.0
